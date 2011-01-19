@@ -128,6 +128,10 @@ class Q3StatusUI(gobject.GObject):
     """
     user interface
     """
+    
+    GAME_READY = 1
+    GAME_NOT_READY = 2
+    GAME_NOT_READY_POLLING = 3
 
     __gsignals__ = {
         'quit' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, ()),
@@ -251,12 +255,30 @@ class Q3StatusUI(gobject.GObject):
         # load icons
         self._icon_bw = gtk.gdk.pixbuf_new_from_file('bw.svg')
         self._icon_color = gtk.gdk.pixbuf_new_from_file('colored.svg')
+        self._icon_bw_polling = gtk.gdk.pixbuf_new_from_file('bw-polling.svg')
         
         # create status icon
         self._status_icon = gtk.status_icon_new_from_pixbuf(self._icon_bw)
 
         # connect signals
         self._status_icon.connect('popup-menu', self._show_popup_menu_cb)
+
+    def set_indicator(self, status, message = None):
+        """
+        set notifications and indicators according to status
+        Arguments:
+        - `indicator`: indicator status
+        """
+        if status == Q3StatusUI.GAME_READY:
+            self._status_icon.set_from_pixbuf(self._icon_color)
+        elif status == Q3StatusUI.GAME_NOT_READY:
+            self._status_icon.set_from_pixbuf(self._icon_bw)
+        elif status == Q3StatusUI.GAME_NOT_READY_POLLING:
+            self._status_icon.set_from_pixbuf(self._icon_bw_polling)
+        
+        # display notification 
+        if message:
+            self._display_notification(message)
 
     def show(self, ):
         """
@@ -328,16 +350,13 @@ class Q3StatusUI(gobject.GObject):
         """
         self.emit('quit')
 
-    def _display_notification(status):
+    def _display_notification(self, message):
         """
         """
         print 'show notification'
-        n = pynotify.Notification('Qstatus', 
-                                  'Game in progress\n'
-                                  'Map: %s\n'
-                                  'Players: %s\n' % (status['mapname'],
-                                                     status['clients']))
-        n.show()
+        if message:
+            n = pynotify.Notification('Q3 alert', message)
+            n.show()
 
 class Q3StatusApp(gobject.GObject):
     """
@@ -347,6 +366,8 @@ class Q3StatusApp(gobject.GObject):
         """
         """
         self.__gobject_init__()
+
+        self._game_available = False
 
         self._conf = Q3StatusConf()
         
@@ -362,6 +383,7 @@ class Q3StatusApp(gobject.GObject):
         self._polling = self._conf.get('core', 'enable', bool)
         if self._polling:
             self._enable_polling()
+            self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY_POLLING)
         
     def _ui_quit_cb(self, ui):
         """
@@ -374,6 +396,26 @@ class Q3StatusApp(gobject.GObject):
         callback for status update from monitor
         """
         print 'status update'
+        try:
+            clients = status.get('clients', int)
+            mapname = status.get('mapname')
+            
+            if not self._game_available:
+                if clients:
+                    self._game_available = True
+                    message = 'Game in progress\n'\
+                        'Map: %s\n' \
+                        'Players: %d' % (mapname, clients)
+                    self._UI.set_indicator(Q3StatusUI.GAME_READY, message)
+            else:
+                if not clients:
+                    self._game_available = False
+                    if polling:
+                        self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY_POLLING)
+                    else:
+                        self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY)
+        except:
+            pass
 
     def _poll_timeout_cb(self):
         """
@@ -419,6 +461,8 @@ class Q3StatusApp(gobject.GObject):
         """
         self._polling = True
         self._schedule_poll()
+        if not self._game_available:
+            self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY_POLLING)
 
     def _schedule_poll(self, ):
         """
@@ -433,6 +477,8 @@ class Q3StatusApp(gobject.GObject):
         disable polling - set polling flag
         """
         self._polling = False
+        if not self._game_available:
+            self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY)
 
     def _settings_updated_cb(self, b):
         """
