@@ -379,7 +379,6 @@ class Q3StatusApp(gobject.GObject):
         """
         polling timeout - check server status
         """
-        retval = True
         print 'poll timeout'
 
         # check the state of polling variable
@@ -387,10 +386,10 @@ class Q3StatusApp(gobject.GObject):
         # hence this workaround
         if self._polling:
             self._monitor.poll()
-        else:
-            retval = False
+            self._schedule_poll()
 
-        return retval
+        # always return false, the new timeout is already added
+        return False
 
     def run(self, ):
         """
@@ -418,10 +417,16 @@ class Q3StatusApp(gobject.GObject):
         """
         enable polling - reload poll interval, set timeout and poll flag
         """
-        self._poll_interval = self._conf.get('core', 'poll_interval', int)
         self._polling = True
+        self._schedule_poll()
+
+    def _schedule_poll(self, ):
+        """
+        add glib timer for polling
+        """
+        self._poll_interval = self._conf.get('core', 'poll_interval', int)            
         # start polling
-        glib.timeout_add_seconds(self._poll_interval, self._poll_timeout_cb)       
+        glib.timeout_add_seconds(self._poll_interval, self._poll_timeout_cb) 
 
     def _disable_polling(self, ):
         """
