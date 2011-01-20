@@ -31,7 +31,7 @@ class Q3Status(object):
         """
         self._data = data_map
 
-    def get(self, key, adapter):
+    def get(self, key, adapter = None):
         """
         return contents of field
         """
@@ -91,11 +91,11 @@ class Q3StatusMonitor(gobject.GObject):
         response = self._req_socket.recv(2000)
         # handle response
         response_data = response.split('\\')
-        print response_data
+        #print response_data
         
         # sanity check
         header = response_data[0][4:].strip()
-        print header
+        #print header
         if header != 'infoResponse':
             return None
         
@@ -400,6 +400,7 @@ class Q3StatusApp(gobject.GObject):
             clients = status.get('clients', int)
             mapname = status.get('mapname')
             
+            print 'clients:', clients, ' mapname:', mapname
             if not self._game_available:
                 if clients:
                     self._game_available = True
@@ -410,12 +411,12 @@ class Q3StatusApp(gobject.GObject):
             else:
                 if not clients:
                     self._game_available = False
-                    if polling:
+                    if self._polling:
                         self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY_POLLING)
                     else:
                         self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY)
-        except:
-            pass
+        except Exception, e:
+            print e
 
     def _poll_timeout_cb(self):
         """
