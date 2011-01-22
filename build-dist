@@ -1,0 +1,2 @@
+rm dist/q3alert*.tar.gz
+python setup.py sdist --formats=gztar
