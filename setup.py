@@ -12,5 +12,6 @@ setup (
     license = 'GPL',
     scripts = ['q3alert'],
     data_files = [('share/q3alert', ['settings-dialog.ui']),
-                  ('share/pixmaps/q3alert', ['bw.svg', 'bw-polling.svg', 'colored.svg'])]
+                  ('share/pixmaps/q3alert', ['bw.svg', 'bw-polling.svg', 'colored.svg']),
+                  ('share/applications', ['desktop/q3alert.desktop'])]
     )

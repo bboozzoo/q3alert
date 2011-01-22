@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=Q3alert
+Type=Application
+GenericName=Q3 server monitor
+Comment=Q3 server monitor
+Exec=q3alert
+Icon=/usr/share/pixmaps/q3alert/colored.svg
+Categories=Games;
+Terminal=false
