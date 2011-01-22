@@ -7,8 +7,11 @@ import pynotify
 import socket
 from os import makedirs
 from ConfigParser import SafeConfigParser
-from os.path import exists
+import os.path
 from io import BytesIO
+
+DATA_DIR='/usr/share/q3alert'
+ICONS_DIR='/usr/share/pixmaps/q3alert'
 
 def singleton(cls):
     """
@@ -196,7 +199,7 @@ class Q3StatusUI(gobject.GObject):
         initialize settings dialog
         """
         builder = gtk.Builder()
-        builder.add_from_file('settings-dialog.ui')
+        builder.add_from_file(os.path.join(DATA_DIR, 'settings-dialog.ui'))
         d = builder.get_object('SettingsDialog')
 
         d.add_button(gtk.STOCK_CANCEL, gtk.RESPONSE_REJECT)
@@ -253,9 +256,9 @@ class Q3StatusUI(gobject.GObject):
         initialize status icon
         """
         # load icons
-        self._icon_bw = gtk.gdk.pixbuf_new_from_file('bw.svg')
-        self._icon_color = gtk.gdk.pixbuf_new_from_file('colored.svg')
-        self._icon_bw_polling = gtk.gdk.pixbuf_new_from_file('bw-polling.svg')
+        self._icon_bw = gtk.gdk.pixbuf_new_from_file(os.path.join(ICONS_DIR, 'bw.svg'))
+        self._icon_color = gtk.gdk.pixbuf_new_from_file(os.path.join(ICONS_DIR, 'colored.svg'))
+        self._icon_bw_polling = gtk.gdk.pixbuf_new_from_file(os.path.join(ICONS_DIR, 'bw-polling.svg'))
         
         # create status icon
         self._status_icon = gtk.status_icon_new_from_pixbuf(self._icon_bw)
@@ -513,10 +516,10 @@ class Q3StatusConf(object):
         conf_dir = glib.get_user_config_dir() + '/q3status'
         self._config_path = conf_dir + '/conf'
 
-        if not exists(conf_dir):
+        if not os.path.exists(conf_dir):
             makedirs(conf_dir)
             
-        if not exists(self._config_path):
+        if not os.path.exists(self._config_path):
             self._fill_default_config()
 
         self._load_config()
@@ -526,7 +529,7 @@ class Q3StatusConf(object):
         parse configuration file
         """
         # try to load the configuration file
-        if exists(self._config_path):
+        if os.path.exists(self._config_path):
             self._config.read(self._config_path)
 
     def _fill_default_config(self, ):
