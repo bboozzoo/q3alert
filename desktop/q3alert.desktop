@@ -6,5 +6,5 @@ GenericName=Q3 server monitor
 Comment=Q3 server monitor
 Exec=q3alert
 Icon=/usr/share/pixmaps/q3alert/colored.svg
-Categories=Games;
+Categories=Game;
 Terminal=false
