@@ -9,9 +9,11 @@ from os import makedirs
 from ConfigParser import SafeConfigParser
 import os.path
 from io import BytesIO
+import simplejson
 
 DATA_DIR='/usr/share/q3alert'
 ICONS_DIR='/usr/share/pixmaps/q3alert'
+CONF_DIR='q3alert'
 
 def singleton(cls):
     """
@@ -23,6 +25,29 @@ def singleton(cls):
             instances[cls] = cls()
         return instances[cls]
     return getinstance
+
+def json_to_q3servers(jsons):
+    """
+    convert JSON string to list of q3 servers
+    Arguments:
+    - `jsons`: JSON string
+    """
+    try:
+        servers = simplejson.loads(jsons)
+    except:
+        servers = []
+    return servers
+
+def q3servers_to_json(servers):
+    """
+    convert list of servers into JSON
+    """
+    try:
+        jsons = simplejson.dumps(servers)
+    except:
+        jsons = '[]'
+    return jsons
+
 
 class Q3Status(object):
     """
@@ -48,25 +73,54 @@ class Q3Status(object):
 
         return value
         
+@singleton
+class Q3ServersList(object):
+    """
+    wrapper for a list for q3 servers
+    """
+    
+    def __init__(self, ):
+        """
+        """
+        self._conf = Q3StatusConf()
+        self._servers = self._conf.get('net', 'servers', json_to_q3servers)
+
+    def get_servers(self, ):
+        """
+        """
+        return self._servers
+
+    def add(self, name, address, port):
+        """
+        add a new server
+        Arguments:
+        - `name`: name under which server appears in config/UI
+        - `address`: server address
+        - `port`: port
+        """
+        pass
+
 class Q3StatusMonitor(gobject.GObject):
     """
     class to handle polling the state and sending notifications
+    for a single server
     """
     __gsignals__ = { 
-        'status-update' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, (object, ))
+        'status-update' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, (object, object, ))
         }
 
-    def __init__(self, ):
+    def __init__(self, server_info):
         """
         constructor
         """
         self.__gobject_init__()
 
         self._conf = Q3StatusConf()
-        self._host = self._conf.get('net', 'host')
-        self._port = self._conf.get('net', 'port', int)
+        self._server_info = server_info
 
+        self._host = socket.gethostbyname(server['address'])
         self._req_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
         self._glib_io_tag = None
  
 
@@ -80,7 +134,7 @@ class Q3StatusMonitor(gobject.GObject):
                 not self._req_socket:
             return None
 
-        print 'get status'
+        #print 'get status'
         request = '\xff\xff\xff\xffgetinfo xxx'
 
         self._glib_io_tag = glib.io_add_watch(self._req_socket.fileno(), glib.IO_IN, self._data_ready_cb)
@@ -114,7 +168,7 @@ class Q3StatusMonitor(gobject.GObject):
         values = [response_data[i] for i in range(len(response_data)) if i % 2 == 1]
         request_map = dict(zip(keys, values))
         
-        self.emit('status-update', Q3Status(request_map))
+        self.emit('status-update', self._server_info, Q3Status(request_map))
 
         # clear source tag
         self._glib_io_tag = None
@@ -373,14 +427,17 @@ class Q3StatusApp(gobject.GObject):
         self._game_available = False
 
         self._conf = Q3StatusConf()
-        
+
+        self._servers = Q3ServersList()
+        self._monitors = []
+        for server in self._servers.get_servers():
+            monitor = Q3StatusMonitor()
+            monitor.connect('status-update', self._status_update_cb)
+
         self._UI = Q3StatusUI()
         self._UI.connect('quit', self._ui_quit_cb)
         self._UI.connect('poll-enable-change', self._polling_enable_changed_cb)
         self._UI.connect('settings-updated', self._settings_updated_cb)
-
-        self._monitor = Q3StatusMonitor()
-        self._monitor.connect('status-update', self._status_update_cb)
 
         self._poll_interval = self._conf.get('core', 'poll_interval', int)
         self._polling = self._conf.get('core', 'enable', bool)
@@ -425,7 +482,7 @@ class Q3StatusApp(gobject.GObject):
         """
         polling timeout - check server status
         """
-        print 'poll timeout'
+        #print 'poll timeout'
 
         # check the state of polling variable
         # it's not possible to remove timeout from events queue (or is it?)
@@ -498,8 +555,7 @@ poll_interval = 20
 enable = 1
 
 [net]
-port = 27960
-host = 10.10.16.24
+servers = '[]'
 '''
 
 @singleton
@@ -513,8 +569,8 @@ class Q3StatusConf(object):
         """
         self._config = SafeConfigParser()
         
-        conf_dir = glib.get_user_config_dir() + '/q3status'
-        self._config_path = conf_dir + '/conf'
+        conf_dir = os.path.join(glib.get_user_config_dir(), CONF_DIR)
+        self._config_path = os.path.join(conf_dir, 'conf')
 
         if not os.path.exists(conf_dir):
             makedirs(conf_dir)
