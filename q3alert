@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import pygtk
+pygtk.require('2.0')
 import gtk
 import gobject
 import glib
@@ -7,6 +9,7 @@ import pynotify
 import socket
 import os
 import os.path
+import subprocess
 from ConfigParser import SafeConfigParser
 from io import BytesIO
 
@@ -142,7 +145,8 @@ class Q3StatusUI(gobject.GObject):
     __gsignals__ = {
         'quit' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, ()),
         'poll-enable-change' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, (bool,)),
-        'settings-updated' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, ())
+        'settings-updated' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, ()),
+        'notification-action' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, (object, ))
         }
 
     __right_click_menu = '''
@@ -160,6 +164,8 @@ class Q3StatusUI(gobject.GObject):
         constructor
         """
         self.__gobject_init__()
+        pynotify.init("Q3 Alert")
+
         self._config = Q3StatusConf()
 
         # build a menu for right click
@@ -173,6 +179,8 @@ class Q3StatusUI(gobject.GObject):
 
         # set the enable notifications flag
         self._enable_notifications = self._config.get('ui', 'notifications', int, 1)
+        # holder for notification object
+        self._notification = None
 
     def _init_menu(self, ):
         """
@@ -276,11 +284,15 @@ class Q3StatusUI(gobject.GObject):
         # connect signals
         self._status_icon.connect('popup-menu', self._show_popup_menu_cb)
 
-    def set_indicator(self, status, message = None):
+    def set_indicator(self, status, message = None, message_actions = None):
         """
         set notifications and indicators according to status
         Arguments:
         - `indicator`: indicator status
+        - `message`: message displayed in indicator
+        - `message_actions`: list of tuples (action_id, action_string, callback)
+        where action_string is the description show to the user, callback is called upon
+        selection of given action
         """
         if status == Q3StatusUI.GAME_READY:
             self._status_icon.set_from_pixbuf(self._icon_color)
@@ -291,7 +303,7 @@ class Q3StatusUI(gobject.GObject):
         
         # display notification 
         if message:
-            self._display_notification(message)
+            self._display_notification(message, message_actions)
 
     def show(self, ):
         """
@@ -371,15 +383,50 @@ class Q3StatusUI(gobject.GObject):
         """
         quit clicked
         """
+        if self._notification:
+            self._notification.close()
+            self._notification = None
         self.emit('quit')
 
-    def _display_notification(self, message):
+    def _notification_action_cb(self, n, action):
         """
+        action from user - notification popup
+        Arguments:
+        - `n`:
+        - `action`:
+        """
+        print 'notification', action
+        n.close()
+        self.emit('notification-action', action)
+
+    def _notification_closed_cb(self, n):
+        """
+        notification popup was closed
+        Arguments:
+        - `n`:
+        """
+        print 'notification closed'
+        self._notification = None
+
+    def _display_notification(self, message, actions):
+        """
+        show a popup notification
+        - `message`: notification text
+        - `actions`: list of uples (action_id, action_string)
         """
         print 'show notification'
-        if self._enable_notifications and message:
-            n = pynotify.Notification('Q3 alert', message)
+        # show notification only if enabled and previous is already gone
+        if self._enable_notifications and \
+                not self._notification:
+            n = pynotify.Notification('Q3 Alert', message)
+            n.connect('closed', self._notification_closed_cb)
+            for act in actions:
+                print 'adding action', act[0], 'description:', act[1]
+                n.add_action(act[0], act[1], self._notification_action_cb)
             n.show()
+            self._notification = n
+
+    
 
 class Q3StatusApp(gobject.GObject):
     """
@@ -398,6 +445,7 @@ class Q3StatusApp(gobject.GObject):
         self._UI.connect('quit', self._ui_quit_cb)
         self._UI.connect('poll-enable-change', self._polling_enable_changed_cb)
         self._UI.connect('settings-updated', self._settings_updated_cb)
+        self._UI.connect('notification-action', self._notification_action_cb)
 
         self._monitor = Q3StatusMonitor()
         self._monitor.connect('status-update', self._status_update_cb)
@@ -454,14 +502,15 @@ class Q3StatusApp(gobject.GObject):
             mapname = status.get('mapname')
             
             print 'clients:', clients, ' mapname:', mapname
+            self._notify_user(status)
+            # show notification only once - if there was no game before
             if not self._game_available:
                 if clients:
                     self._game_available = True
-                    message = 'Game in progress\n'\
-                        'Map: %s\n' \
-                        'Players: %d' % (mapname, clients)
-                    self._UI.set_indicator(Q3StatusUI.GAME_READY, message)
+                    # show notification popup
+                    self._notify_user(status)
             else:
+                # no game - update the icon
                 if not clients:
                     self._game_available = False
                     if self._polling:
@@ -470,6 +519,48 @@ class Q3StatusApp(gobject.GObject):
                         self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY)
         except Exception, e:
             print e
+
+    def _notify_user(self, game_status):
+        """
+        order UI to show a notification to the user
+        about ongoing game
+        Arguments:
+        - `game_status`: Q3Status - game status
+        """
+        message = 'Game in progress\n'\
+            '%s - %d players' % (game_status.get('mapname'), game_status.get('clients', int))
+        self._UI.set_indicator(Q3StatusUI.GAME_READY, message,
+                               [('start_quake', 'Connect')])
+        
+    def _notification_action_cb(self, ui, action):
+        """
+        callback for action from notification popup
+        Arguments:
+        - `action`:
+        """
+        print 'action', action
+        if action == 'start_quake':
+            self._start_quake()
+
+    def _start_quake(self, ):
+        """
+        start quake process as a result of user selection
+        """
+        print 'starting quake'
+        quake_cmd = None
+        try:
+            quake_cmd = self._conf.get('app', 'quake_cmd')
+        except:
+            print 'quake command not set'
+
+        if not quake_cmd:
+            return
+
+        connection_address = '%s:%d' % (self._conf.get('net', 'host'),
+                                        self._conf.get('net', 'port', int))
+        
+        subprocess.Popen([quake_cmd, '+connect', connection_address])
+        
 
     def _poll_timeout_cb(self):
         """
@@ -551,6 +642,9 @@ notifications = 1
 [net]
 port = 27960
 host = 10.10.16.24
+
+[app]
+quake_cmd = ioquake3
 '''
 
 @singleton
