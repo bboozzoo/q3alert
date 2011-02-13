@@ -12,10 +12,11 @@ from io import BytesIO
 
 DATA_DIR='/usr/share/q3alert'
 ICONS_DIR='/usr/share/pixmaps/q3alert'
+CONF_DIR='q3alert'
 
 def singleton(cls):
     """
-    signleton decorator functionb
+    signleton decorator function
     """
     instances = {}
     def getinstance():
@@ -184,14 +185,13 @@ class Q3StatusUI(gobject.GObject):
                                   'Show settings', self._show_settings_cb)])
 
         ui.insert_action_group(actiongroup, 0)
-        print self.__right_click_menu
         ui.add_ui_from_string(self.__right_click_menu)
 
         self._menu = ui.get_widget('/RightClickMenu')
         self._enable_toggle = ui.get_widget('/RightClickMenu/Enable')
 
-        enabled_status = self._config.get('core', 'enable', bool)
-        print 'polling enabled:', enabled_status
+        enabled_status = self._config.get('core', 'enable', int)
+        #print 'polling enabled:', enabled_status
         self._enable_toggle.set_property('active', enabled_status)
 
     def _init_settings_dialog(self, ):
@@ -382,12 +382,29 @@ class Q3StatusApp(gobject.GObject):
         self._monitor = Q3StatusMonitor()
         self._monitor.connect('status-update', self._status_update_cb)
 
+        # load polling settings
+        self._setup_polling()
+        # load autostart setting
+        self._setup_autostart()
+
+    def _setup_polling(self, ):
+        """
+        setup the polling - reload settings from configuration
+        """
         self._poll_interval = self._conf.get('core', 'poll_interval', int)
-        self._polling = self._conf.get('core', 'enable', bool)
+        self._polling = self._conf.get('core', 'enable', int)
+        print 'setup polling, enabled: %d, interval: %d' % (self._polling, self._poll_interval)
         if self._polling:
             self._enable_polling()
-            self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY_POLLING)
-        
+        else:
+            self._disable_polling()
+
+    def _setup_autostart(self, ):
+        """
+        initialize autostart part - reload settings from configuration
+        """
+        self._autostart = self._conf.get('core', 'autostart', int)
+
     def _ui_quit_cb(self, ui):
         """
         UI callback for quit operation
@@ -451,13 +468,9 @@ class Q3StatusApp(gobject.GObject):
         - `b`:
         - `status`: polling status
         """
-        if status:
-            if self._polling:
-                print 'already enabled?'
-            else:
-                self._enable_polling()
-        else:
-            self._disable_polling()
+        print status
+        self._conf.set('core', 'enable', status, int)
+        self._settings_updated_cb(None)
 
     def _enable_polling(self, ):
         """
@@ -489,13 +502,15 @@ class Q3StatusApp(gobject.GObject):
         """
         print 'settings update'
         self._conf.sync()
-
-
+        # reapply settings
+        self._setup_polling()
+        self._setup_autostart()
 
 __default_config__ = '''
 [core]
 poll_interval = 20
 enable = 1
+autostart = 0
 
 [net]
 port = 27960
@@ -513,8 +528,8 @@ class Q3StatusConf(object):
         """
         self._config = SafeConfigParser()
         
-        conf_dir = glib.get_user_config_dir() + '/q3status'
-        self._config_path = conf_dir + '/conf'
+        conf_dir = os.path.join(glib.get_user_config_dir(), CONF_DIR)
+        self._config_path = os.path.join(conf_dir, 'conf')
 
         if not os.path.exists(conf_dir):
             makedirs(conf_dir)
@@ -568,7 +583,7 @@ class Q3StatusConf(object):
 
         return val
 
-    def set(self, section, key, value):
+    def set(self, section, key, value, adapter = None):
         """
         set value of key in group
         Arguments:
@@ -579,7 +594,12 @@ class Q3StatusConf(object):
         if not self._config.has_section(section):
             self._config.add_section(section)
         # now store the value
-        self._config.set(section, key, str(value))
+        aval = None
+        if adapter:
+            aval = adapter(value)
+        else:
+            aval = value
+        self._config.set(section, key, str(aval))
             
 if __name__ == '__main__':
     app = Q3StatusApp()
