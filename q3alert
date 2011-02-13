@@ -514,7 +514,8 @@ class Q3StatusApp(gobject.GObject):
 
         if self._autostart:
             # enable autostart
-            os.symlink(application_file, user_autostart_file)
+            if not os.path.exists(user_autostart_file):
+                os.symlink(application_file, user_autostart_file)
         else:
             # remove startup file if user does not wish
             # to start the app at login
