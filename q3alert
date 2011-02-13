@@ -5,6 +5,7 @@ pygtk.require('2.0')
 import gtk
 import gobject
 import glib
+import gio
 import pynotify
 import socket
 import os
@@ -168,6 +169,11 @@ class Q3StatusUI(gobject.GObject):
 
         self._config = Q3StatusConf()
 
+        # set the enable notifications flag
+        self._enable_notifications = self._config.get('ui', 'notifications', int, 1)
+        # holder for notification object
+        self._notification = None
+
         # build a menu for right click
         self._init_menu()
 
@@ -176,11 +182,6 @@ class Q3StatusUI(gobject.GObject):
 
         # status (tray) icon
         self._init_icon()
-
-        # set the enable notifications flag
-        self._enable_notifications = self._config.get('ui', 'notifications', int, 1)
-        # holder for notification object
-        self._notification = None
 
     def _init_menu(self, ):
         """
@@ -233,8 +234,27 @@ class Q3StatusUI(gobject.GObject):
         self._setting_autostart = builder.get_object('StartAtLogin')
 
         self._setting_notifications = builder.get_object('ShowNotifications')
+        self._setting_notifications.connect('toggled', self._show_notifications_toggled_cb, self)
 
+        self._setting_quake_cmd = builder.get_object('QuakeCmdButton')
+        self._setting_quake_cmd_group = builder.get_object('QuakeCmdGroup')
+        if self._enable_notifications:
+            self._setting_quake_cmd_group.hide_all()
+            
         self._settings_dialog = d
+
+    def _show_notifications_toggled_cb(self, button, ui):
+        """
+        user toggled 'show notifications' button
+        show or hide the quake III path button
+        Arguments:
+        - `button`:
+        - `ui`:
+        """
+        if self._setting_notifications.get_active():
+            self._setting_quake_cmd_group.show_all()
+        else:
+            self._setting_quake_cmd_group.hide_all()
 
     def _setting_ip_entry_changed_cb(self, entry, ui):
         """
@@ -350,6 +370,12 @@ class Q3StatusUI(gobject.GObject):
         # set the flag accordingly
         self._enable_notifications = notifications
 
+        # path to quake binary
+        quake_path = self._setting_quake_cmd.get_filename()
+        if not quake_path:
+            quake_path = ''
+        self._config.set('app', 'quake_cmd', quake_path)
+
     def _fill_settings_dialog(self, ):
         """
         fill entries in settings dialog with current values
@@ -359,6 +385,14 @@ class Q3StatusUI(gobject.GObject):
         self._setting_poll_interval.set_value(self._config.get('core', 'poll_interval', int))
         self._setting_autostart.set_active(self._config.get('core', 'autostart', int))
         self._setting_notifications.set_active(self._config.get('ui', 'notifications', int))
+
+        # load path from configuration
+        quake_path = None
+        try:
+            quake_path = self._config.get('app', 'quake_cmd')
+            self._setting_quake_cmd.set_filename(quake_path)
+        except:
+            self._setting_quake_cmd.set_current_name('(None)')
 
     def _show_settings_cb(self, b):
         """
@@ -420,6 +454,7 @@ class Q3StatusUI(gobject.GObject):
                 not self._notification:
             n = pynotify.Notification('Q3 Alert', message)
             n.connect('closed', self._notification_closed_cb)
+            n.set_icon_from_pixbuf(self._icon_color)
             for act in actions:
                 print 'adding action', act[0], 'description:', act[1]
                 n.add_action(act[0], act[1], self._notification_action_cb)
@@ -502,7 +537,6 @@ class Q3StatusApp(gobject.GObject):
             mapname = status.get('mapname')
             
             print 'clients:', clients, ' mapname:', mapname
-            self._notify_user(status)
             # show notification only once - if there was no game before
             if not self._game_available:
                 if clients:
@@ -529,8 +563,22 @@ class Q3StatusApp(gobject.GObject):
         """
         message = 'Game in progress\n'\
             '%s - %d players' % (game_status.get('mapname'), game_status.get('clients', int))
-        self._UI.set_indicator(Q3StatusUI.GAME_READY, message,
-                               [('start_quake', 'Connect')])
+        actions = []
+        action_connect = ('start_quake', 'Connect')
+
+        # show the connect action only if the quake command
+        # is an executable file
+        try:
+            quake_cmd = self._conf.get('app', 'quake_cmd')
+            if quake_cmd and \
+                    os.path.isfile(quake_cmd) and \
+                    os.access(quake_cmd, os.X_OK):
+                actions.append(action_connect)
+        except:
+            pass
+        # call the UI indicator, allowing the user to click on 'Connect'
+        # to automagically start quake and connect to given server
+        self._UI.set_indicator(Q3StatusUI.GAME_READY, message, actions)
         
     def _notification_action_cb(self, ui, action):
         """
@@ -644,7 +692,7 @@ port = 27960
 host = 10.10.16.24
 
 [app]
-quake_cmd = ioquake3
+quake_cmd = 
 '''
 
 @singleton
