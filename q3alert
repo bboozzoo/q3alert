@@ -171,6 +171,9 @@ class Q3StatusUI(gobject.GObject):
         # status (tray) icon
         self._init_icon()
 
+        # set the enable notifications flag
+        self._enable_notifications = self._config.get('ui', 'notifications', int, 1)
+
     def _init_menu(self, ):
         """
         initialize menu for right click
@@ -220,6 +223,9 @@ class Q3StatusUI(gobject.GObject):
         self._setting_poll_interval.set_lower(1)
 
         self._setting_autostart = builder.get_object('StartAtLogin')
+
+        self._setting_notifications = builder.get_object('ShowNotifications')
+
         self._settings_dialog = d
 
     def _setting_ip_entry_changed_cb(self, entry, ui):
@@ -327,6 +333,11 @@ class Q3StatusUI(gobject.GObject):
         autostart = int(self._setting_autostart.get_active())
         self._config.set('core', 'autostart', autostart)
 
+        notifications = int(self._setting_notifications.get_active())
+        self._config.set('ui', 'notifications', notifications)
+        # set the flag accordingly
+        self._enable_notifications = notifications
+
     def _fill_settings_dialog(self, ):
         """
         fill entries in settings dialog with current values
@@ -335,6 +346,7 @@ class Q3StatusUI(gobject.GObject):
         self._setting_port_entry.set_text(self._config.get('net', 'port'))
         self._setting_poll_interval.set_value(self._config.get('core', 'poll_interval', int))
         self._setting_autostart.set_active(self._config.get('core', 'autostart', int))
+        self._setting_notifications.set_active(self._config.get('ui', 'notifications', int))
 
     def _show_settings_cb(self, b):
         """
@@ -365,7 +377,7 @@ class Q3StatusUI(gobject.GObject):
         """
         """
         print 'show notification'
-        if message:
+        if self._enable_notifications and message:
             n = pynotify.Notification('Q3 alert', message)
             n.show()
 
@@ -533,6 +545,9 @@ poll_interval = 20
 enable = 1
 autostart = 0
 
+[ui]
+notifications = 1
+
 [net]
 port = 27960
 host = 10.10.16.24
@@ -584,19 +599,24 @@ class Q3StatusConf(object):
             config_file.truncate()
             self._config.write(config_file)
 
-    def get(self, section, key, adapter = None):
+    def get(self, section, key, adapter = None, default = None):
         """
         get value of setting
         Arguments:
         - `section`: section name
         - `key`: key name
         - `adapter`: adapter function for type conversion
+        - `default`: default value if the requested is not present
         """
         val = None
         try:
             val = self._config.get(section, key)
         except:
-            raise KeyError
+            if default:
+                self.set(section, key, default, adapter)
+                val = default
+            else:
+                raise KeyError
 
         # apply adapter if provided
         if adapter:
@@ -610,6 +630,9 @@ class Q3StatusConf(object):
         Arguments:
         - `section`: section name
         - `key`: key
+        - `value`: value to be saved
+        - `adapter`: optional adapter to conver the value to a type that
+        can be stringified
         """
         # add section it if does not exist
         if not self._config.has_section(section):
