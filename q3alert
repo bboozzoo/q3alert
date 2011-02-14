@@ -169,10 +169,7 @@ class Q3StatusUI(gobject.GObject):
 
         self._config = Q3StatusConf()
 
-        # set the enable notifications flag
-        self._enable_notifications = self._config.get('ui', 'notifications', int, 1)
-        # holder for notification object
-        self._notification = None
+        self._init_notifications()
 
         # build a menu for right click
         self._init_menu()
@@ -182,6 +179,25 @@ class Q3StatusUI(gobject.GObject):
 
         # status (tray) icon
         self._init_icon()
+
+    def _init_notifications(self, ):
+        """
+        initialize notification support, check server capabilities
+        """
+        # get capabilities of the server
+        server_caps = pynotify.get_server_caps()
+
+        # check if actions are supported
+        self._notification_action_support = False
+        if filter(lambda x: x == 'actions', server_caps):
+            self._notification_action_support = True
+
+        # set the enable notifications flag
+        self._enable_notifications = self._config.get('ui', 'notifications', int, 1)
+        # holder for notification object
+        self._notification = None
+
+        
 
     def _init_menu(self, ):
         """
@@ -455,9 +471,10 @@ class Q3StatusUI(gobject.GObject):
             n = pynotify.Notification('Q3 Alert', message)
             n.connect('closed', self._notification_closed_cb)
             n.set_icon_from_pixbuf(self._icon_color)
-            for act in actions:
-                print 'adding action', act[0], 'description:', act[1]
-                n.add_action(act[0], act[1], self._notification_action_cb)
+            if self._notification_action_support:
+                for act in actions:
+                    print 'adding action', act[0], 'description:', act[1]
+                    n.add_action(act[0], act[1], self._notification_action_cb)
             n.show()
             self._notification = n
 
