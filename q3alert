@@ -147,15 +147,19 @@ class Q3StatusUI(gobject.GObject):
         'quit' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, ()),
         'poll-enable-change' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, (bool,)),
         'settings-updated' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, ()),
-        'notification-action' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, (object, ))
+        'notification-action' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, (object, )),
+        'connect' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, ())
         }
 
-    __right_click_menu = '''
+    __popup_menu = '''
     <ui>
       <popup name="RightClickMenu">
         <menuitem action="Enable" />
         <menuitem action="Settings" />
         <menuitem action="Quit"/>
+      </popup>
+      <popup name="LeftClickMenu">
+        <menuitem action="Connect" />
       </popup>
     </ui>
     '''
@@ -201,28 +205,39 @@ class Q3StatusUI(gobject.GObject):
 
     def _init_menu(self, ):
         """
-        initialize menu for right click
+        initialize menu for right and left click
         """
+        # build UI
         ui = gtk.UIManager()
-        actiongroup = gtk.ActionGroup('RightClick')
+        rc_actiongroup = gtk.ActionGroup('RightClick')
 
-        actiongroup.add_toggle_actions([('Enable', None, '_Enable polling', None,
-                                         'Enable server polling', self._toggle_polling_cb)])
+        rc_actiongroup.add_toggle_actions([('Enable', None, '_Enable polling', None,
+                                            'Enable server polling', self._toggle_polling_cb)])
 
-        actiongroup.add_actions([('Quit', gtk.STOCK_QUIT, '_Quit', None,
-                                  'Exit program', self._quit_cb),
-                                 ('Settings', None, '_Settings', None,
-                                  'Show settings', self._show_settings_cb)])
+        rc_actiongroup.add_actions([('Quit', gtk.STOCK_QUIT, '_Quit', None,
+                                     'Exit program', self._quit_cb),
+                                    ('Settings', None, '_Settings', None,
+                                     'Show settings', self._show_settings_cb)])
 
-        ui.insert_action_group(actiongroup, 0)
-        ui.add_ui_from_string(self.__right_click_menu)
+        lc_actiongroup = gtk.ActionGroup('LeftClick')
+        lc_actiongroup.add_actions([('Connect', None, '_Connect', None,
+                                     'Connect to server', self._server_connect_cb)])
 
-        self._menu = ui.get_widget('/RightClickMenu')
+        ui.insert_action_group(rc_actiongroup, 0)
+        ui.insert_action_group(lc_actiongroup, 1)
+
+        ui.add_ui_from_string(self.__popup_menu)
+
+        # configure widgets for right click
+        self._rc_menu = ui.get_widget('/RightClickMenu')
         self._enable_toggle = ui.get_widget('/RightClickMenu/Enable')
 
         enabled_status = self._config.get('core', 'enable', int)
         #print 'polling enabled:', enabled_status
         self._enable_toggle.set_property('active', enabled_status)
+
+        # configure widgets for left click
+        self._lc_menu = ui.get_widget('/LeftClickMenu')
 
     def _init_settings_dialog(self, ):
         """
@@ -318,7 +333,8 @@ class Q3StatusUI(gobject.GObject):
         self._status_icon = gtk.status_icon_new_from_pixbuf(self._icon_bw)
 
         # connect signals
-        self._status_icon.connect('popup-menu', self._show_popup_menu_cb)
+        self._status_icon.connect('popup-menu', self._show_popup_rc_menu_cb)
+        self._status_icon.connect('activate', self._show_popup_lc_menu_cb)
 
     def set_indicator(self, status, message = None, message_actions = None):
         """
@@ -353,7 +369,7 @@ class Q3StatusUI(gobject.GObject):
         print 'status:', self._enable_toggle.get_active()
         self.emit('poll-enable-change', self._enable_toggle.get_active())
 
-    def _show_popup_menu_cb(self, status_icon, button, activate_time):
+    def _show_popup_rc_menu_cb(self, status_icon, button, activate_time):
         """
         callback for right click
         Arguments:
@@ -361,9 +377,21 @@ class Q3StatusUI(gobject.GObject):
         - `button`:
         - `activate_time`:
         """
-        if self._menu:
-            self._menu.popup(None, None, gtk.status_icon_position_menu, 
-                             button, activate_time, status_icon)
+        if self._rc_menu:
+            self._rc_menu.popup(None, None, gtk.status_icon_position_menu, 
+                                button, activate_time, status_icon)
+
+    def _show_popup_lc_menu_cb(self, status_icon):
+        """
+        callback for left click
+        Arguments:
+        - `status_icon`:
+        - `button`:
+        - `activate_time`:
+        """
+        if self._lc_menu:
+            self._lc_menu.popup(None, None, gtk.status_icon_position_menu, 
+                                1, gtk.get_current_event_time(), status_icon)
 
     def _update_settings(self, ):
         """
@@ -409,6 +437,14 @@ class Q3StatusUI(gobject.GObject):
             self._setting_quake_cmd.set_filename(quake_path)
         except:
             self._setting_quake_cmd.set_current_name('(None)')
+
+    def _server_connect_cb(self, b):
+        """
+        user clicked on connect button
+        Arguments:
+        - `b`:
+        """
+        self.emit('connect')
 
     def _show_settings_cb(self, b):
         """
@@ -498,6 +534,7 @@ class Q3StatusApp(gobject.GObject):
         self._UI.connect('poll-enable-change', self._polling_enable_changed_cb)
         self._UI.connect('settings-updated', self._settings_updated_cb)
         self._UI.connect('notification-action', self._notification_action_cb)
+        self._UI.connect('connect', self._server_connect_cb)
 
         self._monitor = Q3StatusMonitor()
         self._monitor.connect('status-update', self._status_update_cb)
@@ -607,6 +644,14 @@ class Q3StatusApp(gobject.GObject):
         print 'action', action
         if action == 'start_quake':
             self._start_quake()
+
+    def _server_connect_cb(self, ui):
+        """
+        callback for connect to server selected by user
+        Arguments:
+        - `ui`:
+        """
+        self._start_quake()
 
     def _start_quake(self, ):
         """
