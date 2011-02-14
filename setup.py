@@ -6,7 +6,7 @@ setup (
     name = 'q3alert',
     description = 'Q3 server monitoring applet',
     long_description = 'An applet to monitor Q3 server and notify the user about games in progress',
-    version = '0.3.1',
+    version = '0.3.2',
     author = 'Maciek Borzecki',
     author_email = 'maciek.borzecki@gmail.com',
     license = 'GPL',
