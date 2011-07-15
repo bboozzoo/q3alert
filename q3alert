@@ -85,7 +85,11 @@ class Q3StatusMonitor(gobject.GObject):
         if not self._host or \
                 not self._port or \
                 not self._req_socket:
-            return None
+            return
+
+        if self._glib_io_tag:
+            glib.source_remove(self._glib_io_tag)
+            self._glib_io_tag = None
 
         print 'get status'
         request = '\xff\xff\xff\xffgetinfo xxx'
@@ -670,7 +674,8 @@ class Q3StatusApp(gobject.GObject):
         connection_address = '%s:%d' % (self._conf.get('net', 'host'),
                                         self._conf.get('net', 'port', int))
         
-        subprocess.Popen([quake_cmd, '+connect', connection_address])
+        #subprocess.Popen([quake_cmd, '+connect', connection_address])
+        glib.spawn_async([quake_cmd, '+connect', connection_address])
         
 
     def _poll_timeout_cb(self):
