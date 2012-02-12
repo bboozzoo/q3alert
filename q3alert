@@ -32,6 +32,11 @@ def singleton(cls):
         return instances[cls]
     return getinstance
 
+class Q3Error(Exception):
+    """error wrapper"""
+    pass
+
+
 class Q3Status(object):
     """
     Q3 status wrapper
@@ -55,7 +60,8 @@ class Q3Status(object):
             value = adapter(value)
 
         return value
-        
+
+
 class Q3StatusMonitor(gobject.GObject):
     """
     class to handle polling the state and sending notifications
@@ -249,9 +255,9 @@ class Q3StatusUI(gobject.GObject):
         initialize settings dialog
         """
         builder = gtk.Builder()
-        builder.add_from_file(os.path.join(DATA_DIR, 'settings-dialog.ui'))
+        builder.add_from_file(Q3FileRes.get_ui_file('settings-dialog.ui'))
         d = builder.get_object('SettingsDialog')
-        d.set_icon_from_file(os.path.join(ICONS_DIR, 'colored.svg'))
+        d.set_icon_from_file(Q3FileRes.get_icon_file('colored.svg'))
 
         d.add_button(gtk.STOCK_CANCEL, gtk.RESPONSE_REJECT)
         # save the button for later use
@@ -330,9 +336,9 @@ class Q3StatusUI(gobject.GObject):
         initialize status icon
         """
         # load icons
-        self._icon_bw = gtk.gdk.pixbuf_new_from_file(os.path.join(ICONS_DIR, 'bw.svg'))
-        self._icon_color = gtk.gdk.pixbuf_new_from_file(os.path.join(ICONS_DIR, 'colored.svg'))
-        self._icon_bw_polling = gtk.gdk.pixbuf_new_from_file(os.path.join(ICONS_DIR, 'bw-polling.svg'))
+        self._icon_bw = gtk.gdk.pixbuf_new_from_file(Q3FileRes.get_icon_file('bw.svg'))
+        self._icon_color = gtk.gdk.pixbuf_new_from_file(Q3FileRes.get_icon_file('colored.svg'))
+        self._icon_bw_polling = gtk.gdk.pixbuf_new_from_file(Q3FileRes.get_icon_file('bw-polling.svg'))
         
         # create status icon
         self._status_icon = gtk.status_icon_new_from_pixbuf(self._icon_bw)
@@ -567,7 +573,7 @@ class Q3StatusApp(gobject.GObject):
         """
         user_autostart_dir = os.path.join(glib.get_user_config_dir(), 'autostart')
         user_autostart_file = os.path.join(user_autostart_dir, DESKTOP_FILE)
-        application_file = os.path.join(APPLICATIONS_DIR, DESKTOP_FILE)
+        application_file = Q3FileRes.get_desktop_file(DESKTOP_FILE)
 
         self._autostart = self._conf.get('core', 'autostart', int)
 
@@ -855,7 +861,74 @@ class Q3StatusConf(object):
         else:
             aval = value
         self._config.set(section, key, str(aval))
+
+class Q3FileRes(object):
+    """file resouce manager
+    """
+    
+    def __init__(self, ):
+        """
+        """
+        
+        pass
+
+    @staticmethod
+    def _find_file_in_dirs(dirs_list, file_name):
+        """Locate in one of directories, and return a full path to file.
+        Raise Q3Error if file is not found
+        """
+        found_path = None
+
+        for d in dirs_list:
+            fp = os.path.join(d, file_name)
+            if os.path.exists(fp):
+                found_path = fp
+                break
+
+        if not found_path:
+            raise Q3Error('resource file %s not found' % (file_name))
+
+        return found_path
+
+    @staticmethod
+    def get_ui_file(file_name):
+        """obtain path to .ui file
+        """
+        dirs = [DATA_DIR]
+        if _in_source():
+            dirs.append('.')
+        
+        return Q3FileRes._find_file_in_dirs(dirs, file_name)
+
+    @staticmethod
+    def get_icon_file(icon_name):
+        """obtain path to icon file
+        """
+        dirs = [ICONS_DIR]
+        if _in_source():
+            dirs.append('.')
             
+        return Q3FileRes._find_file_in_dirs(dirs, icon_name)
+
+    @staticmethod
+    def get_desktop_file(file_name):
+        """obtain path to desktop file
+        """
+        dirs = [APPLICATIONS_DIR]
+        if _in_source():
+            dirs.append('./desktop')
+            
+        return Q3FileRes._find_file_in_dirs(dirs, file_name)
+
+
+def _in_source():
+    """indicate if running in source code directory
+    """
+    if os.getenv('IN_SOURCE'):
+        return True
+    return False
+    
+         
 if __name__ == '__main__':
     app = Q3StatusApp()
     app.run()
