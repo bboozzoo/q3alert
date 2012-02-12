@@ -83,6 +83,7 @@ class Q3StatusMonitor(gobject.GObject):
 
         self._req_socket = socket.socket(socket.AF_INET, 
                                          socket.SOCK_DGRAM)
+        self._req_socket.setblocking(0)
         self._log.debug('got socket, fd %d', 
                         self._req_socket.fileno())
 
