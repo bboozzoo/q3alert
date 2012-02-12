@@ -107,36 +107,68 @@ class Q3StatusMonitor(gobject.GObject):
         # magic
         request = '\xff\xff\xff\xffgetinfo xxx'
 
+        # TODO: check error status??
+        try:
+            res = self._req_socket.sendto(request, (self._host, 
+                                                    self._port))
+            self._log.debug('sent %d bytes to server %s:%s', 
+                            res, self._host, self._port)
+        except socket.error, serr:
+            self._log.exception(serr)
+            return
+
         self._glib_io_tag = glib.io_add_watch(self._req_socket.fileno(), 
                                               glib.IO_IN, 
                                               self._data_ready_cb)
-        # TODO: check error status??
-        self._req_socket.sendto(request, (self._host, self._port))
 
     def _data_ready_cb(self, source, condition):
         """
         callback for data ready on request socket
         """
+        start_tag = '\xff' * 4 + 'infoResponse\n'
+
         self._log.debug('data ready')
         # fetch data
         response = self._req_socket.recv(2000)
-        # handle response
-        response_data = response.split('\\')
-        #print response_data
+        self._log.debug('got %d bytes from server', len(response))
         
-        # sanity check
-        header = response_data[0][4:].strip()
-        #print header
-        if header != 'infoResponse':
-            return None
+        # basic sanity checking
+        if len(response) < len(start_tag):
+            self._log.error('length sanity check failed, expected %d ' \
+                                'got %d bytes',
+                            len(start_tag), len(response))
+            return False
+
+        # check if start tag is presnet
+        if not response.startswith(start_tag):
+            self._log.error('malformed response, does not start with %s',
+                            start_tag);
+            self._log.error('response data')
+            self._log.error(response)
+            return False
+
+        # strip start tag
+        response = response[len(start_tag):]
+        self._log.debug('response data: %s', str(response))
         
         # skip header
+        response_data = response.split('\\')
+        # expect at least \<tag>\<tag>
+        if len(response_data) <= 3:
+            self._log.error('invalid response data, got %d elements',
+                            len(response_data))
+            self._log.error(response_data)
+            return False
+
+        # skip first element - ''
         response_data = response_data[1:]
-    
+        self._log.debug(str(response_data))
+
         # check length of remanining parameters - should be even
         # these are key-value pairs
         if len(response_data) % 2 != 0:
-            return None
+            self._log.error('failed even length sanity check')
+            return False
         
         keys = [response_data[i] for i in \
                     range(len(response_data)) \
@@ -144,10 +176,11 @@ class Q3StatusMonitor(gobject.GObject):
         values = [response_data[i] for i in \
                       range(len(response_data)) \
                       if i % 2 == 1]
-        request_map = dict(zip(keys, values))
+        response_map = dict(zip(keys, values))
         
+        self._log.debug('server response: %s', str(response_map))
         self._log.debug('emit status-update')
-        self.emit('status-update', Q3Status(request_map))
+        self.emit('status-update', Q3Status(response_map))
 
         # clear source tag
         self._glib_io_tag = None
@@ -426,7 +459,7 @@ class Q3StatusUI(gobject.GObject):
         """
         
         """
-        self._log.debug('toggle polling, enabled:',
+        self._log.debug('toggle polling, enabled: %s',
                         self._enable_toggle.get_active())
         self.emit('poll-enable-change', self._enable_toggle.get_active())
 
@@ -608,12 +641,13 @@ class Q3StatusApp(gobject.GObject):
         self._log = logging.getLogger('q3alert')
         self._log.setLevel(logging.INFO)
         try:
-            if self._conf.get('core', 'debug'):
+            if self._conf.get('core', 'debug', int, 0):
                 self._log.setLevel(logging.DEBUG)
-                
-                self._log.debug('initializing q3alert')
+               
         except KeyError, e:
             pass
+
+        self._log.debug('initializing q3alert')
 
         self._UI = Q3StatusUI()
         self._UI.connect('quit', self._ui_quit_cb)
@@ -642,9 +676,10 @@ class Q3StatusApp(gobject.GObject):
                         self._polling, self._poll_interval)
 
         if self._polling:
-            self._log.info('enabling polling')
+            self._log.info('enable polling')
             self._enable_polling()
         else:
+            self._log.info('disable polling')
             self._disable_polling()
 
     def _setup_autostart(self, ):
@@ -695,6 +730,8 @@ class Q3StatusApp(gobject.GObject):
             if not self._game_available:
                 self._log.debug('no previous game, maybe notify user')
                 if clients:
+                    self._log.info('game ready, map %s, %d clients',
+                                   mapname, clients)
                     self._game_available = True
                     # show notification popup
                     self._notify_user(status)
