@@ -14,12 +14,13 @@ import os.path
 import subprocess
 from ConfigParser import SafeConfigParser
 from io import BytesIO
+import logging
 
-APPLICATIONS_DIR='/usr/share/applications'
-DATA_DIR='/usr/share/q3alert'
-ICONS_DIR='/usr/share/pixmaps/q3alert'
-CONF_DIR='q3alert'
-DESKTOP_FILE='q3alert.desktop'
+APPLICATIONS_DIR = '/usr/share/applications'
+DATA_DIR = '/usr/share/q3alert'
+ICONS_DIR = '/usr/share/pixmaps/q3alert'
+CONF_DIR = 'q3alert'
+DESKTOP_FILE = 'q3alert.desktop'
 
 def singleton(cls):
     """
@@ -67,7 +68,8 @@ class Q3StatusMonitor(gobject.GObject):
     class to handle polling the state and sending notifications
     """
     __gsignals__ = { 
-        'status-update' : (gobject.SIGNAL_RUN_LAST, gobject.TYPE_NONE, (object, ))
+        'status-update' : (gobject.SIGNAL_RUN_LAST, 
+                           gobject.TYPE_NONE, (object, ))
         }
 
     def __init__(self, ):
@@ -76,11 +78,17 @@ class Q3StatusMonitor(gobject.GObject):
         """
         self.__gobject_init__()
 
+        self._log = logging.getLogger('q3alert.q3monitor')
+
         self._conf = Q3StatusConf()
         self._host = self._conf.get('net', 'host')
         self._port = self._conf.get('net', 'port', int)
 
-        self._req_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._req_socket = socket.socket(socket.AF_INET, 
+                                         socket.SOCK_DGRAM)
+        self._log.debug('got socket, fd %d', 
+                        self._req_socket.fileno())
+
         self._glib_io_tag = None
  
 
@@ -88,26 +96,31 @@ class Q3StatusMonitor(gobject.GObject):
         """
         get status from server
         """
-        
+        self._log.debug('request q3 server status')
         if not self._host or \
                 not self._port or \
                 not self._req_socket:
             return
 
         if self._glib_io_tag:
+            self._log.debug('glib IO tag present, remove')
             glib.source_remove(self._glib_io_tag)
             self._glib_io_tag = None
 
-        print 'get status'
+        # magic
         request = '\xff\xff\xff\xffgetinfo xxx'
 
-        self._glib_io_tag = glib.io_add_watch(self._req_socket.fileno(), glib.IO_IN, self._data_ready_cb)
+        self._glib_io_tag = glib.io_add_watch(self._req_socket.fileno(), 
+                                              glib.IO_IN, 
+                                              self._data_ready_cb)
+        # TODO: check error status??
         self._req_socket.sendto(request, (self._host, self._port))
 
     def _data_ready_cb(self, source, condition):
         """
         callback for data ready on request socket
         """
+        self._log.debug('data ready')
         # fetch data
         response = self._req_socket.recv(2000)
         # handle response
@@ -132,6 +145,7 @@ class Q3StatusMonitor(gobject.GObject):
         values = [response_data[i] for i in range(len(response_data)) if i % 2 == 1]
         request_map = dict(zip(keys, values))
         
+        self._log.debug('emit status-update')
         self.emit('status-update', Q3Status(request_map))
 
         # clear source tag
@@ -139,11 +153,12 @@ class Q3StatusMonitor(gobject.GObject):
         # return false to remove from watch
         return False
         
-
     def poll(self, ):
         """
         """
+        self._log.debug('poll')
         self._send_status_req()
+
         
 class Q3StatusUI(gobject.GObject):
     """
@@ -179,21 +194,29 @@ class Q3StatusUI(gobject.GObject):
         """
         constructor
         """
+        self._log = logging.getLogger('q3alert.ui')
+
         self.__gobject_init__()
+
         pynotify.init("Q3 Alert")
 
         self._config = Q3StatusConf()
+        self._log.debug('configuration load done')
 
         self._init_notifications()
+        self._log.debug('notifications init done')
 
         # build a menu for right click
         self._init_menu()
+        self._log.debug('menu init done')
 
         # build settings dialog
         self._init_settings_dialog()
+        self._log.debug('settings dialog init done')
 
         # status (tray) icon
         self._init_icon()
+        self._log.debug('tray icon init done')
 
     def _init_notifications(self, ):
         """
@@ -201,18 +224,24 @@ class Q3StatusUI(gobject.GObject):
         """
         # get capabilities of the server
         server_caps = pynotify.get_server_caps()
+        self._log.debug('notification capabilities: %s', 
+                        ', '.join(server_caps))
 
         # check if actions are supported
         self._notification_action_support = False
         if filter(lambda x: x == 'actions', server_caps):
+            self._log.debug('notification actions support present')
             self._notification_action_support = True
 
         # set the enable notifications flag
         self._enable_notifications = self._config.get('ui', 'notifications', int, 1)
+        if self._enable_notifications:
+            self._log.debug('notifications enabled')
+        else:
+            self._log.debug('notifications disabled')
+
         # holder for notification object
         self._notification = None
-
-        
 
     def _init_menu(self, ):
         """
@@ -244,7 +273,6 @@ class Q3StatusUI(gobject.GObject):
         self._enable_toggle = ui.get_widget('/RightClickMenu/Enable')
 
         enabled_status = self._config.get('core', 'enable', int)
-        #print 'polling enabled:', enabled_status
         self._enable_toggle.set_property('active', enabled_status)
 
         # configure widgets for left click
@@ -357,6 +385,7 @@ class Q3StatusUI(gobject.GObject):
         where action_string is the description show to the user, callback is called upon
         selection of given action
         """
+        self._log.debug('update indicator, status: %d', status)
         if status == Q3StatusUI.GAME_READY:
             self._status_icon.set_from_pixbuf(self._icon_color)
         elif status == Q3StatusUI.GAME_NOT_READY:
@@ -366,6 +395,7 @@ class Q3StatusUI(gobject.GObject):
         
         # display notification 
         if message:
+            self._log.debug('notify with message: %s', message)
             self._display_notification(message, message_actions)
 
     def show(self, ):
@@ -377,7 +407,7 @@ class Q3StatusUI(gobject.GObject):
         """
         
         """
-        print 'status:', self._enable_toggle.get_active()
+        self._log.debug('toggle polling, enabled:', self._enable_toggle.get_active())
         self.emit('poll-enable-change', self._enable_toggle.get_active())
 
     def _show_popup_rc_menu_cb(self, status_icon, button, activate_time):
@@ -388,6 +418,7 @@ class Q3StatusUI(gobject.GObject):
         - `button`:
         - `activate_time`:
         """
+        self._log.debug('show right click popup')
         if self._rc_menu:
             self._rc_menu.popup(None, None, gtk.status_icon_position_menu, 
                                 button, activate_time, status_icon)
@@ -400,6 +431,7 @@ class Q3StatusUI(gobject.GObject):
         - `button`:
         - `activate_time`:
         """
+        self._log.debug('show left click popup')
         if self._lc_menu:
             self._lc_menu.popup(None, None, gtk.status_icon_position_menu, 
                                 1, gtk.get_current_event_time(), status_icon)
@@ -408,6 +440,8 @@ class Q3StatusUI(gobject.GObject):
         """
         put new settings into configuration
         """
+        self._log.debug('settings update')
+        
         ip = self._setting_ip_entry.get_text()
         self._config.set('net', 'host', ip)
 
@@ -455,13 +489,14 @@ class Q3StatusUI(gobject.GObject):
         Arguments:
         - `b`:
         """
+        self._log.info('connecto to Quake 3 server')
         self.emit('connect')
 
     def _show_settings_cb(self, b):
         """
         show settings clicked
         """
-        print 'show settings'
+        self._log.debug('show settings')
         # fill entries in dialog with data
         self._fill_settings_dialog()
 
@@ -480,6 +515,7 @@ class Q3StatusUI(gobject.GObject):
         """
         quit clicked
         """
+        self._log.debug('UI quit')
         if self._notification:
             self._notification.close()
             self._notification = None
@@ -492,7 +528,7 @@ class Q3StatusUI(gobject.GObject):
         - `n`:
         - `action`:
         """
-        print 'notification', action
+        self._log.debug('notification action clicked')
         n.close()
         self.emit('notification-action', action)
 
@@ -502,7 +538,7 @@ class Q3StatusUI(gobject.GObject):
         Arguments:
         - `n`:
         """
-        print 'notification closed'
+        self._log.debug('notification closed')
         self._notification = None
 
     def _display_notification(self, message, actions):
@@ -511,7 +547,7 @@ class Q3StatusUI(gobject.GObject):
         - `message`: notification text
         - `actions`: list of uples (action_id, action_string)
         """
-        print 'show notification'
+        self._log.debug('show notification')
         # show notification only if enabled and previous is already gone
         if self._enable_notifications and \
                 not self._notification:
@@ -520,11 +556,11 @@ class Q3StatusUI(gobject.GObject):
             n.set_icon_from_pixbuf(self._icon_color)
             if self._notification_action_support:
                 for act in actions:
-                    print 'adding action', act[0], 'description:', act[1]
+                    self._log.debug('adding action: %s description: %s', 
+                                    act[0], act[1])
                     n.add_action(act[0], act[1], self._notification_action_cb)
             n.show()
             self._notification = n
-
     
 
 class Q3StatusApp(gobject.GObject):
@@ -539,16 +575,29 @@ class Q3StatusApp(gobject.GObject):
         self._game_available = False
 
         self._conf = Q3StatusConf()
-        
+
+        # setup logging from configuration
+        self._log = logging.getLogger('q3alert')
+        self._log.setLevel(logging.INFO)
+        try:
+            if self._conf.get('core', 'debug'):
+                self._log.setLevel(logging.DEBUG)
+                
+                self._log.debug('initializing q3alert')
+        except KeyError, e:
+            pass
+
         self._UI = Q3StatusUI()
         self._UI.connect('quit', self._ui_quit_cb)
         self._UI.connect('poll-enable-change', self._polling_enable_changed_cb)
         self._UI.connect('settings-updated', self._settings_updated_cb)
         self._UI.connect('notification-action', self._notification_action_cb)
         self._UI.connect('connect', self._server_connect_cb)
+        self._log.debug('UI init done')
 
         self._monitor = Q3StatusMonitor()
         self._monitor.connect('status-update', self._status_update_cb)
+        self._log.debug('status monitoring init done')
 
         # load polling settings
         self._setup_polling()
@@ -561,8 +610,11 @@ class Q3StatusApp(gobject.GObject):
         """
         self._poll_interval = self._conf.get('core', 'poll_interval', int)
         self._polling = self._conf.get('core', 'enable', int)
-        print 'setup polling, enabled: %d, interval: %d' % (self._polling, self._poll_interval)
+        self._log.debug('setup polling, enabled: %d, interval: %d', 
+                        self._polling, self._poll_interval)
+
         if self._polling:
+            self._log.info('enabling polling')
             self._enable_polling()
         else:
             self._disable_polling()
@@ -576,35 +628,43 @@ class Q3StatusApp(gobject.GObject):
         application_file = Q3FileRes.get_desktop_file(DESKTOP_FILE)
 
         self._autostart = self._conf.get('core', 'autostart', int)
-
+        self._log.debug('autostart: %d', self._autostart)
+        
         if self._autostart:
             # enable autostart
             if not os.path.exists(user_autostart_file):
+                self._log.debug('autostart enabled, create symlink %s -> %s',
+                                application_file, user_autostart_file)
                 os.symlink(application_file, user_autostart_file)
         else:
             # remove startup file if user does not wish
             # to start the app at login
             if os.path.exists(user_autostart_file):
+                self._log.debug('autostart disabled, remove %s',
+                                user_autostart_file)
                 os.remove(user_autostart_file)
 
     def _ui_quit_cb(self, ui):
         """
         UI callback for quit operation
         """
+        self._log.info('quit')
         gtk.main_quit()
 
     def _status_update_cb(self, q3statusmonitor, status):
         """
         callback for status update from monitor
         """
-        print 'status update'
+        self._log.debug('status update callback')
         try:
             clients = status.get('clients', int)
             mapname = status.get('mapname')
             
-            print 'clients:', clients, ' mapname:', mapname
+            self._log.debug('clients: %d', clients)
+            self._log.debug('mapname: %s', mapname)
             # show notification only once - if there was no game before
             if not self._game_available:
+                self._log.debug('no previous game, maybe notify user')
                 if clients:
                     self._game_available = True
                     # show notification popup
@@ -612,13 +672,16 @@ class Q3StatusApp(gobject.GObject):
             else:
                 # no game - update the icon
                 if not clients:
+                    self._log.debug('game has finished, update status')
                     self._game_available = False
+                    
                     if self._polling:
                         self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY_POLLING)
                     else:
                         self._UI.set_indicator(Q3StatusUI.GAME_NOT_READY)
-        except Exception, e:
-            print e
+
+        except Q3Error, e:
+            self._log.error(str(e))
 
     def _notify_user(self, game_status):
         """
@@ -630,7 +693,6 @@ class Q3StatusApp(gobject.GObject):
         message = 'Game in progress\n'\
             '%s - %d players' % (game_status.get('mapname'), game_status.get('clients', int))
         actions = []
-        action_connect = ('start_quake', 'Connect')
 
         # show the connect action only if the quake command
         # is an executable file
@@ -639,9 +701,10 @@ class Q3StatusApp(gobject.GObject):
             if quake_cmd and \
                     os.path.isfile(quake_cmd) and \
                     os.access(quake_cmd, os.X_OK):
-                actions.append(action_connect)
-        except:
-            pass
+                actions.append(('start_quake', 'Connect'))
+        except Q3Error, e:
+            self._log.error(str(e))
+
         # call the UI indicator, allowing the user to click on 'Connect'
         # to automagically start quake and connect to given server
         self._UI.set_indicator(Q3StatusUI.GAME_READY, message, actions)
@@ -652,7 +715,7 @@ class Q3StatusApp(gobject.GObject):
         Arguments:
         - `action`:
         """
-        print 'action', action
+        self._log.debug('action %s', action)
         if action == 'start_quake':
             self._start_quake()
 
@@ -668,33 +731,37 @@ class Q3StatusApp(gobject.GObject):
         """
         start quake process as a result of user selection
         """
-        print 'starting quake'
+        self._log.debug('start quake')
         quake_cmd = None
         try:
             quake_cmd = self._conf.get('app', 'quake_cmd')
         except:
-            print 'quake command not set'
+            self._log.error('quake command not set')
 
         if not quake_cmd:
+            # show a popup window?
             return
 
         connection_address = '%s:%d' % (self._conf.get('net', 'host'),
                                         self._conf.get('net', 'port', int))
         
-        #subprocess.Popen([quake_cmd, '+connect', connection_address])
-        glib.spawn_async([quake_cmd, '+connect', connection_address])
+        quake_call_cmd = [quake_cmd, '+connect', connection_address]
+        self._log.info('starting quake: %s', ' '.join(quake_call_cmd))
+
+        glib.spawn_async(quake_call_cmd)
         
 
     def _poll_timeout_cb(self):
         """
         polling timeout - check server status
         """
-        print 'poll timeout'
+        self._log.debug('poll timeout')
 
         # check the state of polling variable
         # it's not possible to remove timeout from events queue (or is it?)
         # hence this workaround
         if self._polling:
+            self._log.debug('polling still enabled, schedule poll')
             self._monitor.poll()
             self._schedule_poll()
 
@@ -705,6 +772,7 @@ class Q3StatusApp(gobject.GObject):
         """
         enter main loop
         """
+        self._log.debug('run UI')
         self._UI.show()
         gtk.main()
 
@@ -715,7 +783,7 @@ class Q3StatusApp(gobject.GObject):
         - `b`:
         - `status`: polling status
         """
-        print status
+        self._log.debug('polling change %s', str(status))
         self._conf.set('core', 'enable', status, int)
         self._settings_updated_cb(None)
 
@@ -732,7 +800,9 @@ class Q3StatusApp(gobject.GObject):
         """
         add glib timer for polling
         """
-        self._poll_interval = self._conf.get('core', 'poll_interval', int)            
+        self._poll_interval = self._conf.get('core', 'poll_interval', int)
+        
+        self._log.debug('schedule poll in %ds', self._poll_interval)
         # start polling
         glib.timeout_add_seconds(self._poll_interval, self._poll_timeout_cb) 
 
@@ -747,17 +817,19 @@ class Q3StatusApp(gobject.GObject):
     def _settings_updated_cb(self, b):
         """
         """
-        print 'settings update'
+        self._log.debug('settings update - sync & reload')
         self._conf.sync()
         # reapply settings
         self._setup_polling()
         self._setup_autostart()
+
 
 __default_config__ = '''
 [core]
 poll_interval = 20
 enable = 1
 autostart = 0
+debug = 0
 
 [ui]
 notifications = 1
@@ -779,6 +851,7 @@ class Q3StatusConf(object):
     def __init__(self, ):
         """
         """
+        self._log = logging.getLogger('q3alert.conf')
         self._config = SafeConfigParser()
         
         conf_dir = os.path.join(glib.get_user_config_dir(), CONF_DIR)
@@ -812,6 +885,7 @@ class Q3StatusConf(object):
         """
         save configuration
         """
+        self._log.debug('sync configuration file')
         with open(self._config_path, 'w') as config_file:
             config_file.truncate()
             self._config.write(config_file)
@@ -828,11 +902,17 @@ class Q3StatusConf(object):
         val = None
         try:
             val = self._config.get(section, key)
+            self._log.debug('found config %s:%s = %s', 
+                            section, key, val)
         except:
             if default:
                 self.set(section, key, default, adapter)
                 val = default
+                self._log.debug('config %s:%s not present, use default %s',
+                                section, key, val)
             else:
+                self._log.error('config %s:%s not present, missing default value',
+                                section, key)
                 raise KeyError
 
         # apply adapter if provided
@@ -860,7 +940,10 @@ class Q3StatusConf(object):
             aval = adapter(value)
         else:
             aval = value
+        self._log.debug('store config %s:%s = %s', section, key, 
+                        str(aval))
         self._config.set(section, key, str(aval))
+
 
 class Q3FileRes(object):
     """file resouce manager
@@ -872,13 +955,24 @@ class Q3FileRes(object):
         
         pass
 
+
+    @staticmethod
+    def _get_logger():
+        """return logging object
+        """
+        return logging.getLogger('q3alert.resouce')
+
     @staticmethod
     def _find_file_in_dirs(dirs_list, file_name):
         """Locate in one of directories, and return a full path to file.
         Raise Q3Error if file is not found
         """
-        found_path = None
+        log = Q3FileRes._get_logger()
 
+        log.debug('find file %s in dirs: %s', file_name,
+                  ', '.join(dirs_list))
+        found_path = None
+        
         for d in dirs_list:
             fp = os.path.join(d, file_name)
             if os.path.exists(fp):
@@ -886,8 +980,11 @@ class Q3FileRes(object):
                 break
 
         if not found_path:
+            log.error('file %s not found in directories %s', file_name,
+                      ', '.join(dirs_list))
             raise Q3Error('resource file %s not found' % (file_name))
 
+        log.debug('found file %s', found_path)
         return found_path
 
     @staticmethod
@@ -930,6 +1027,9 @@ def _in_source():
     
          
 if __name__ == '__main__':
+    # default logging level to info
+    logging.basicConfig(level=logging.INFO)
+
     app = Q3StatusApp()
     app.run()
 
