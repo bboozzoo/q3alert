@@ -108,7 +108,6 @@ class Q3StatusMonitor(gobject.GObject):
         # magic
         request = '\xff\xff\xff\xffgetinfo xxx'
 
-        # TODO: check error status??
         try:
             res = self._req_socket.sendto(request, (self._host, 
                                                     self._port))
