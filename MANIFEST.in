@@ -1,0 +1,5 @@
+include README COPYING 
+recursive-include desktop *
+recursive-include rpm *
+recursive-include icons *
+include q3alert *.ui

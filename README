@@ -1,0 +1,5 @@
+* Introduction
+q3alert is a simple applet for monitoring remote Quake 3 servers. The
+applet sits in tray and polls the sever every configured amount of
+time. Whenever a match is started, the user will be shown a nice
+notification, and the application icon shall change.
