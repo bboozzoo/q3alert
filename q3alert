@@ -1070,7 +1070,7 @@ class Q3FileRes(object):
         """
         dirs = [ICONS_DIR]
         if _in_source():
-            dirs.append('.')
+            dirs.append('./icons')
             
         return Q3FileRes._find_file_in_dirs(dirs, icon_name)
 
